@@ -2,48 +2,54 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'xtrendence/cryptoshare'
-        CONTAINER_NAME = 'cryptoshare_container'
+        SCANNER_HOME = tool 'sonar-scanner'
+        IMAGE_NAME = 'adarshadakane/newbuild'
+        CONTAINER_NAME = 'newbuild'
         // SONARQUBE_CONTAINER = 'sonarqube_server'
         // SONARQUBE_PORT = '9000'
         PROJECT_PORT = '3190'
+        
         // SONARQUBE_URL = 'http://localhost:9000'
     }
 
     stages {
-        stage('Checkout SCM') {
+        stage('Checkout from Git') {
             steps {
-                git branch: 'main', url: 'https://github.com/Xtrendence/CryptoShare.git'
+                git branch: 'main', url: 'https://github.com/adarshadakane/Final_year_crypto_automation.git'
             }
         }
 
-    //   stage('Sonaqube Analysis ')  {
-    //         // We have to configure sonar cube server on timestamp 1:08:15 in the video  
-    //         steps{
-                
-    //             script{
-                    
-    //                 withSonarQubeEnv(credentialsId : 'sonar') {
-                        
-    //                     sh 'mvn clean package sonar:sonar'
-    //                 }
-    //             }
-                    
-    //         }
-    //     }
 
-        // stage('SonarQube Analysis') {
+        stage("Sonarqube Analysis") {
+            steps {
+             withSonarQubeEnv('SonarQube-Server') {
+                sh '''
+                 ${SCANNER_HOME}/bin/sonar-scanner \
+                -Dsonar.projectKey=Crypto \
+                -Dsonar.sources=. \
+                -Dsonar.host.url=http://13.127.106.180:9000 \
+                -Dsonar.login=sqp_f91f0899bc4d9cf046f607d8cd1b0b147b30ae53
+                    '''
+                }
+            }
+        }
+
+        // stage("Quality Gate") {
         //     steps {
         //         script {
-        //             withSonarQubeEnv('SonarQube') {
-        //                 sh """
-        //                 until curl -s ${SONARQUBE_URL} >/dev/null; do echo "Waiting for SonarQube..."; sleep 5; done
-        //                 sonar-scanner -Dsonar.projectKey=CryptoShare -Dsonar.sources=. -Dsonar.host.url=${SONARQUBE_URL}
-        //                 """
-        //             }
+        //             waitForQualityGate abortPipeline: false, credentialsId: 'SonarQube-Token'
         //         }
         //     }
         // }
+
+        stage('TRIVY FS SCAN') {
+            steps {
+                    sh '/usr/bin/trivy fs . > trivyfs.txt'
+                }
+            }
+
+
+    
         stage("Docker Image Build")
         {
             steps
@@ -53,13 +59,13 @@ pipeline {
             }
         }
         
-        stage('Build and Push Docker Image') {  // Renamed stage
-            steps {
-                script {
-                    sh "docker pull ${IMAGE_NAME}"
-                }
-            }
-        }
+        // stage('Build and Push Docker Image') {  // Renamed stage
+        //     steps {
+        //         script {
+        //             sh "docker pull ${IMAGE_NAME}"
+        //         }
+        //     }
+        // }
 
         // stage('Stop Existing Container') {
         //     steps {
@@ -72,14 +78,53 @@ pipeline {
         //     }
         // }
 
-        stage('Run Docker Container') {
+        
+
+        stage("Push Image to DockerHub")
+         {
+            steps
+            {
+                script
+                {
+                        withCredentials([string(credentialsId: 'DockerHub-Passwd', variable: 'DockerHubPasswd')]) {
+                                sh 'docker login -u  adarshadakane -p $DockerHubPasswd'
+                               sh 'docker push adarshadakane/newbuild:$BUILD_NUMBER'
+                            }
+                    
+                }
+                
+            }
+        }
+
+         stage('Clean Existing Container') {
             steps {
                 script {
-                    sh "docker run -d --name ${CONTAINER_NAME} -p ${PROJECT_PORT}:${PROJECT_PORT} ${IMAGE_NAME}"
+                    sh """
+                        echo "Stopping and removing existing container if exists..."
+                        docker ps -q --filter "name=${CONTAINER_NAME}" | grep -q . && docker stop ${CONTAINER_NAME} || true
+                        docker ps -a -q --filter "name=${CONTAINER_NAME}" | grep -q . && docker rm ${CONTAINER_NAME} || true
+                    """
                 }
             }
         }
 
+
+
+        
+        stage('Run Docker Container') {
+            steps {
+                script {
+                    sh "docker run -d --name ${CONTAINER_NAME} -p ${PROJECT_PORT}:${PROJECT_PORT} ${IMAGE_NAME}:$BUILD_NUMBER"
+                }
+            }
+        }
+
+
+
+
+
+
+        
         // stage('Show EC2 Public DNS') {
         //     steps {
         //         script {
